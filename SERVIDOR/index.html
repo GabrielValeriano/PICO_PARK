@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pico Park Dinámico</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let groundY;
+        let players = {}; // Empieza vacío sin excepción
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            groundY = canvas.height - 150;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        const socket = new WebSocket('ws://' + window.location.hostname + ':3000');
+
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'new_player') {
+                    // Solo lo agregamos si no existe ya
+                    if (!players[data.id]) {
+                        players[data.id] = {
+                            x: 100 + (data.id * 80),
+                            y: groundY,
+                            size: 50,
+                            color: data.color,
+                            dx: 0, dy: 0
+                        };
+                    }
+                }
+                if (data.type === 'remove_player') {
+                    delete players[data.id];
+                }
+                if (data.type === 'cmd') {
+                    const p = players[data.id];
+                    if (p) {
+                        if (data.command === 'LEFT_START') p.dx = -8;
+                        if (data.command === 'RIGHT_START') p.dx = 8;
+                        if (data.command === 'LEFT_STOP' || data.command === 'RIGHT_STOP') p.dx = 0;
+                        if (data.command === 'JUMP' && p.y >= groundY) p.dy = -18;
+                    }
+                }
+            } catch (e) {}
+        };
+
+        function update() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#16213e";
+            ctx.fillRect(0, groundY + 50, canvas.width, canvas.height);
+
+            for (let id in players) {
+                let p = players[id];
+                p.x += p.dx;
+                if (p.x < 0) p.x = 0;
+                if (p.x + p.size > canvas.width) p.x = canvas.width - p.size;
+                p.y += p.dy;
+                if (p.y < groundY) p.dy += 0.8;
+                else { p.y = groundY; p.dy = 0; }
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+            }
+            requestAnimationFrame(update);
+        }
+        update();
+    </script>
+</body>
+</html>
