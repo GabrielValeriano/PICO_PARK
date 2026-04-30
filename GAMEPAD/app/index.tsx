@@ -3,28 +3,63 @@ import { View, Text, TouchableOpacity, SafeAreaView } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 
 export default function Gamepad() {
+// 1. Declaramos los estados (esto es lo que te falta)
   const [status, setStatus] = useState('Conectando...');
-  const [myColor, setMyColor] = useState('#333');
+  const [playerNumber, setPlayerNumber] = useState<number | null>(null); // <--- ESTA ES LA QUE TE PIDE
+  const [myColor, setMyColor] = useState('#fff'); // Para guardar el color del server
+  
+  // Referencia para el WebSocket
   const ws = useRef<WebSocket | null>(null);
 
-  useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+useEffect(() => {
+    // 1. Intentar bloquear orientación (si falla, no pasa nada)
+    const lockOrientation = async () => {
+      try {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+      } catch (e) {
+        console.log("PC detectada: No se puede bloquear orientación.");
+      }
+    };
+    lockOrientation();
 
-    // RECUERDA CAMBIAR LOCALHOST POR TU IP SI USAS EL CELULAR
-    ws.current = new WebSocket('ws://localhost:3000'); 
+    // 2. Conectar al servidor
+    const serverIP = '127.0.0.1'; 
+    const socket = new WebSocket(`ws://${serverIP}:3000`);
+    ws.current = socket;
 
-    ws.current.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'setup') {
-      setMyColor(data.color);
-      setStatus(`Jugador ${data.idVisual} - Conectado`); // Ahora dirá 1, 2, 3 o 4
+    socket.onopen = () => {
+      console.log("✅ Conexión física establecida");
+      // 🔑 ENVIAR ESTO ES LO MÁS IMPORTANTE
+      const identificacion = JSON.stringify({ type: 'is_gamepad' });
+      socket.send(identificacion);
+      console.log("📨 Solicitud de ID enviada al servidor");
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("📩 Datos recibidos en el Gamepad:", data);
+
+        // Si el servidor nos manda la configuración inicial
+        if (data.type === 'setup') {
+          console.log("✅ Configuración de jugador recibida correctamente");
+          
+          // ESTO es lo que cambia el texto de "Conectando..." a "Jugador X"
+          setPlayerNumber(data.idVisual);
+          setMyColor(data.color);
+          setStatus(`Jugador ${data.idVisual}`); 
+        }
+      } catch (e) {
+        // Aquí caen los mensajes que no son JSON (movimientos de otros jugadores)
+        // No hacemos nada para no llenar la consola
       }
     };
 
-    ws.current.onopen = () => setStatus('Esperando ID...');
-    ws.current.onclose = () => setStatus('Desconectado');
+    socket.onclose = () => setStatus('Desconectado');
 
-    return () => ws.current?.close();
+    return () => {
+      socket.close();
+    };
   }, []);
 
 const sendCommand = (command: string) => {
