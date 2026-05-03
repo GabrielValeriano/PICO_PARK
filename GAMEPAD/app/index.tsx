@@ -23,7 +23,7 @@ useEffect(() => {
     lockOrientation();
 
     // 2. Conectar al servidor
-    const serverIP = '127.0.0.1'; 
+    const serverIP = 'localhost'; 
     const socket = new WebSocket(`ws://${serverIP}:3000`);
     ws.current = socket;
 
