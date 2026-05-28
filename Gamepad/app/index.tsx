@@ -125,7 +125,7 @@ export default function Gamepad() {
     return (
       <View style={{ flex: 1 }}>
         <CameraView 
-          style={StyleSheet.absoluteFillObject} 
+          style={StyleSheet.absoluteFill} 
           onBarcodeScanned={({ data }) => connectToServer(data)} 
         />
         <TouchableOpacity style={styles.backBtn} onPress={() => setShowScanner(false)}>
