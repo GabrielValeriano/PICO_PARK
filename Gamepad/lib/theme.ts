@@ -1,4 +1,8 @@
-import { DarkTheme, DefaultTheme, type Theme } from '@react-navigation/native';
+import { ThemeProvider } from 'expo-router';
+import React from 'react';
+
+// Extraemos el tipo exacto que espera el ThemeProvider de Expo
+type Theme = React.ComponentProps<typeof ThemeProvider>['value'];
  
 export const THEME = {
   light: {
@@ -54,10 +58,31 @@ export const THEME = {
     chart5: 'hsl(340 75% 55%)',
   },
 };
+
+// Configuración de fuentes estándar requeridas por las nuevas versiones
+const defaultFonts = {
+  regular: {
+    fontFamily: 'System',
+    fontWeight: '400' as const,
+  },
+  medium: {
+    fontFamily: 'System',
+    fontWeight: '500' as const,
+  },
+  bold: {
+    fontFamily: 'System',
+    fontWeight: '700' as const,
+  },
+  heavy: {
+    fontFamily: 'System',
+    fontWeight: '900' as const,
+  },
+};
  
 export const NAV_THEME: Record<'light' | 'dark', Theme> = {
   light: {
-    ...DefaultTheme,
+    dark: false,
+    fonts: defaultFonts, // 👈 Agregado para solucionar el error
     colors: {
       background: THEME.light.background,
       border: THEME.light.border,
@@ -68,7 +93,8 @@ export const NAV_THEME: Record<'light' | 'dark', Theme> = {
     },
   },
   dark: {
-    ...DarkTheme,
+    dark: true,
+    fonts: defaultFonts, // 👈 Agregado para solucionar el error
     colors: {
       background: THEME.dark.background,
       border: THEME.dark.border,
