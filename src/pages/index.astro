@@ -1,0 +1,628 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Pico Park">
+    <main>
+        <div id="lobby">
+            <h1 id="lobby-title" class="title">PICO PARK</h1>
+            <p class="subtitle">Consejo: Trabajen en equipo para ganar</p>
+            
+            <div id="qr-wrapper" class="qr-container glass-panel">
+                <h2 class="scan-text">UNITE A LA SALA</h2>
+                <div class="qr-content">
+                    <canvas id="qr-canvas"></canvas>
+                    <div class="ip-info">
+                        <p class="ip-label">Dirección IP:</p>
+                        <h2 id="ip-display">Generando...</h2>
+                    </div>
+                </div>
+            </div>
+
+            <div id="pause-menu" class="glass-panel" style="display: none; text-align: center;">
+                <h1 class="pause-title">JUEGO PAUSADO</h1>
+                <div class="menu-options">
+                    <p id="opt-0" class="menu-item active">REANUDAR</p>
+                    <p id="opt-1" class="menu-item">SALIR AL LOBBY</p>
+                </div>
+            </div>
+
+            <div class="status-box glass-panel">
+                <p>JUGADORES EN SALA: <span id="count" class="highlight">0</span> <span class="max-players">/ 4</span></p>
+            </div>
+        </div>
+
+        <div id="win-screen" style="display: none;">
+            <div class="win-panel glass-panel">
+                <h1 class="win-title">¡VICTORIA!</h1>
+                <p class="win-subtitle">¡Excelente trabajo en equipo!</p>
+                <p class="win-timer">Preparando siguiente sala en 10 segundos...</p>
+            </div>
+        </div>
+
+        <div id="game-container" style="display: none;"></div>
+    </main>
+</Layout>
+
+<script>
+    import Matter from 'matter-js';
+    import QRCode from 'qrcode';
+
+    const socket = new WebSocket(`ws://${window.location.hostname}:3000/ws`);
+    let players = {}; 
+    let playerInputs = {}; 
+    let gameState = 'LOBBY';
+    let currentLevel = 1;
+    let isPaused = false;
+    let menuIndex = 0;
+
+    let keyBody: Matter.Body | null = null;
+    let doorBody: Matter.Body | null = null;
+    let mapObstacles: Matter.Body[] = [];
+    let keyOwnerId: string | null = null;
+    let isDoorOpen = false;
+
+    // COLORES PLANOS Y NORMALES
+    const COLOR_BG = '#1e293b';           
+    const COLOR_WALL = '#0f172a';         
+    const COLOR_PLATFORM = '#3b82f6';     
+    const COLOR_DOOR_CLOSED = '#ef4444';  
+    const COLOR_DOOR_OPEN = '#22c55e';    
+    const COLOR_KEY = '#eab308';          
+    const PLAYER_COLORS = ['#dc2626', '#16a34a', '#2563eb', '#d97706']; 
+
+    const engine = Matter.Engine.create();
+    const runner = Matter.Runner.create();
+    let render;
+
+    // BUCLE FÍSICO
+    Matter.Events.on(engine, 'beforeUpdate', () => {
+        if (isPaused || gameState === 'LOBBY') return;
+
+        Object.keys(playerInputs).forEach(id => {
+            const body = players[id];
+            if (body) {
+                let vx = 0;
+                if (playerInputs[id].left) vx = -6;
+                if (playerInputs[id].right) vx = 6;
+                Matter.Body.setVelocity(body, { x: vx, y: body.velocity.y });
+                Matter.Body.setAngle(body, 0); 
+            }
+        });
+
+        if (keyOwnerId && keyBody && players[keyOwnerId]) {
+            const owner = players[keyOwnerId];
+            Matter.Body.setPosition(keyBody, { x: owner.position.x + 35, y: owner.position.y });
+            Matter.Body.setAngle(keyBody, 0); 
+            Matter.Body.setVelocity(keyBody, { x: 0, y: 0 });
+            Matter.Body.setAngularVelocity(keyBody, 0); 
+
+            if (doorBody && !isDoorOpen) {
+                const distanceToDoor = Matter.Vector.magnitude(Matter.Vector.sub(keyBody.position, doorBody.position));
+                if (distanceToDoor < 55) {
+                    isDoorOpen = true;
+                    keyOwnerId = null;
+                    Matter.World.remove(engine.world, keyBody);
+                    keyBody = null;
+                    doorBody.render.fillStyle = COLOR_DOOR_OPEN; 
+                }
+            }
+        }
+
+        if (isDoorOpen && doorBody) {
+            let playersInGoal = 0;
+            const totalPlayers = Object.keys(players).length;
+            Object.values(players).forEach((body: any) => {
+                const distance = Matter.Vector.magnitude(Matter.Vector.sub(body.position, doorBody.position));
+                if (distance < 60) playersInGoal++;
+            });
+            if (playersInGoal === totalPlayers && totalPlayers > 0) nextLevel();
+        }
+    });
+
+    Matter.Events.on(engine, 'collisionStart', (event) => {
+        event.pairs.forEach(pair => {
+            if (!keyBody) return;
+            let playerBody = null;
+            let playerId = null;
+
+            Object.keys(players).forEach(id => {
+                if (players[id] === pair.bodyA.parent) { playerBody = pair.bodyA.parent; playerId = id; }
+                if (players[id] === pair.bodyB.parent) { playerBody = pair.bodyB.parent; playerId = id; }
+            });
+
+            if (playerBody && !keyOwnerId && (pair.bodyA.parent === keyBody || pair.bodyB.parent === keyBody)) {
+                keyOwnerId = playerId;
+                keyBody.collisionFilter.mask = 0; 
+                keyBody.parts.forEach(part => { part.isSensor = true; });
+                Matter.Body.setVelocity(keyBody, { x: 0, y: 0 });
+                Matter.Body.setAngularVelocity(keyBody, 0);
+            }
+        });
+    });
+
+    function createKey(x, y) {
+        const keyParts = [];
+        const shaftWidth = 35;
+        const shaftHeight = 10;
+        const handleDiameter = 20;
+        const bitWidth = 8;
+        const bitHeight = 12;
+
+        const shaft = Matter.Bodies.rectangle(x, y, shaftWidth, shaftHeight, { render: { fillStyle: COLOR_KEY } });
+        keyParts.push(shaft);
+        const handle = Matter.Bodies.circle(x - shaftWidth / 2 - handleDiameter / 2 + shaftHeight / 2, y, handleDiameter / 2, { render: { fillStyle: COLOR_KEY } });
+        keyParts.push(handle);
+        const bit = Matter.Bodies.rectangle(x + shaftWidth / 2 - bitWidth / 2, y + shaftHeight / 2 + bitHeight / 2, bitWidth, bitHeight, { render: { fillStyle: COLOR_KEY } });
+        keyParts.push(bit);
+
+        const compositeKey = Matter.Body.create({
+            parts: keyParts,
+            inertia: Infinity,
+            friction: 0.1,
+            restitution: 0.2
+        });
+
+        Matter.Body.setPosition(compositeKey, { x, y });
+        return compositeKey;
+    }
+
+    function loadLevel(level) {
+        Matter.World.clear(engine.world, false);
+        mapObstacles = [];
+        keyOwnerId = null;
+        isDoorOpen = false;
+
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
+        const wallOptions = { 
+            isStatic: true, 
+            render: { fillStyle: COLOR_WALL },
+            friction: 0,
+            frictionStatic: 0 
+        };
+        
+        const altoSuelo = 60;
+        const altoPuerta = 90;
+        
+        const sueloTopY = h - altoSuelo; 
+        const centroPuertaY = sueloTopY - (altoPuerta / 2); 
+
+        const boundaries = [
+            Matter.Bodies.rectangle(w/2, h - (altoSuelo/2), w, altoSuelo, wallOptions),
+            Matter.Bodies.rectangle(-25, h/2, 60, h, wallOptions),
+            Matter.Bodies.rectangle(w + 25, h/2, 60, h, wallOptions),
+            Matter.Bodies.rectangle(w/2, -25, w, 60, wallOptions)
+        ];
+        
+        let levelBodies = [...boundaries];
+
+        if (level === 1) {
+            document.getElementById('win-screen')!.style.display = 'none';
+            keyBody = createKey(w / 2, sueloTopY - 20);
+            doorBody = Matter.Bodies.rectangle(w - 100, centroPuertaY, 60, altoPuerta, { 
+                isStatic: true, 
+                isSensor: true,
+                render: { fillStyle: COLOR_DOOR_CLOSED } 
+            });
+            levelBodies.push(keyBody, doorBody);
+        } 
+        else if (level === 2) {
+            document.getElementById('win-screen')!.style.display = 'none';
+            
+            const platformOptions = { 
+                isStatic: true, 
+                render: { fillStyle: COLOR_PLATFORM }, 
+                friction: 0, 
+                frictionStatic: 0 
+            };
+            
+            mapObstacles = [
+                Matter.Bodies.rectangle(w / 3, h - 180, 230, 25, platformOptions),
+                Matter.Bodies.rectangle(w / 1.65, h - 270, 230, 25, platformOptions)
+            ];
+            
+            keyBody = createKey(w / 1.65, h - 295);
+            
+            doorBody = Matter.Bodies.rectangle(w - 100, centroPuertaY, 60, altoPuerta, { 
+                isStatic: true, 
+                isSensor: true,
+                render: { fillStyle: COLOR_DOOR_CLOSED } 
+            });
+            
+            levelBodies.push(...mapObstacles, keyBody, doorBody);
+        } 
+        else if (level === 3) {
+            gameState = 'WIN';
+            document.getElementById('win-screen')!.style.display = 'flex';
+            setTimeout(() => { resetToLobby(); }, 10000); 
+        }
+
+        Matter.World.add(engine.world, levelBodies);
+
+        Object.values(players).forEach((body: any, index) => {
+            Matter.World.add(engine.world, body);
+            Matter.Body.setPosition(body, { x: 100 + (index * 50), y: sueloTopY - 40 });
+            Matter.Body.setVelocity(body, { x: 0, y: 0 });
+            Matter.Body.setAngle(body, 0);
+        });
+    }
+
+    function nextLevel() {
+        currentLevel++;
+        loadLevel(currentLevel);
+    }
+
+    function hasPlayerOnTop(playerBody) {
+        let onTop = false;
+        Object.values(players).forEach((other: any) => {
+            if (other === playerBody) return;
+            const closeX = Math.abs(other.position.x - playerBody.position.x) < 40;
+            const directlyAbove = (playerBody.position.y - other.position.y) > 30 && (playerBody.position.y - other.position.y) < 55;
+            if (closeX && directlyAbove) onTop = true;
+        });
+        return onTop;
+    }
+
+    function setupRender() {
+        if (render) return;
+        render = Matter.Render.create({
+            element: document.getElementById('game-container')!,
+            engine: engine,
+            options: { 
+                width: window.innerWidth, 
+                height: window.innerHeight, 
+                wireframes: false, 
+                background: COLOR_BG 
+            }
+        });
+        Matter.Render.run(render);
+        Matter.Runner.run(runner, engine);
+    }
+
+    function resetToLobby() {
+        gameState = 'LOBBY';
+        currentLevel = 1;
+        isPaused = false;
+        runner.enabled = false;
+        document.getElementById('game-container')!.style.display = 'none';
+        const lobbyDiv = document.getElementById('lobby')!;
+        lobbyDiv.style.display = 'flex';
+        lobbyDiv.classList.remove('paused-bg'); 
+        document.getElementById('pause-menu')!.style.display = 'none';
+        document.getElementById('qr-wrapper')!.style.display = 'flex';
+        document.getElementById('lobby-title')!.style.display = 'block';
+        document.querySelector('.subtitle')!.style.display = 'block';
+        document.getElementById('win-screen')!.style.display = 'none';
+        socket.send(JSON.stringify({ type: 'RESET_SERVER_PLAYERS' }));
+    }
+
+    function togglePause(paused: boolean) {
+        isPaused = paused;
+        runner.enabled = !paused;
+        menuIndex = 0;
+        const lobbyDiv = document.getElementById('lobby')!;
+        lobbyDiv.style.display = paused ? 'flex' : 'none';
+        if (paused) lobbyDiv.classList.add('paused-bg');
+        else lobbyDiv.classList.remove('paused-bg');
+        document.getElementById('pause-menu')!.style.display = paused ? 'flex' : 'none';
+        document.getElementById('qr-wrapper')!.style.display = 'none';
+        document.getElementById('lobby-title')!.style.display = 'none';
+        document.querySelector('.subtitle')!.style.display = 'none';
+        document.getElementById('opt-0')!.classList.add('active');
+        document.getElementById('opt-1')!.classList.remove('active');
+    }
+
+    setupRender();
+    socket.onopen = () => socket.send(JSON.stringify({ type: 'is_game' }));
+
+    socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'server_info') {
+            const canvas = document.getElementById('qr-canvas');
+            if (canvas) QRCode.toCanvas(canvas, `ws://${data.ip}:3000/ws`, { 
+                width: 180, 
+                color: { dark: '#0f172a', light: '#ffffff' }, 
+                margin: 2
+            });
+            document.getElementById('ip-display')!.innerText = data.ip;
+        }
+
+        if (data.type === 'new_player') {
+            if (!players[data.id]) {
+                const char = Matter.Bodies.rectangle(150, window.innerHeight - 100, 45, 45, { 
+                    render: { fillStyle: PLAYER_COLORS[data.id] || '#ffffff' }, 
+                    friction: 0,
+                    frictionStatic: 0,
+                    restitution: 0,
+                    inertia: Infinity 
+                });
+                players[data.id] = char;
+                playerInputs[data.id] = { left: false, right: false };
+                if (gameState === 'PLAYING') Matter.World.add(engine.world, char);
+                document.getElementById('count')!.innerText = Object.keys(players).length.toString();
+            }
+        }
+
+        if (data.type === 'remove_player') {
+            if (players[data.id]) {
+                if (keyOwnerId === data.id) keyOwnerId = null;
+                Matter.World.remove(engine.world, players[data.id]);
+                delete players[data.id];
+                delete playerInputs[data.id];
+                const currentCount = Object.keys(players).length;
+                document.getElementById('count')!.innerText = currentCount.toString();
+                if (currentCount === 0) resetToLobby();
+            }
+        }
+
+        if (isPaused) {
+            if (data.command === 'UP') { menuIndex = 0; document.getElementById('opt-0')!.classList.add('active'); document.getElementById('opt-1')!.classList.remove('active'); }
+            if (data.command === 'DOWN') { menuIndex = 1; document.getElementById('opt-1')!.classList.add('active'); document.getElementById('opt-0')!.classList.remove('active'); }
+            if (data.command === 'JUMP') {
+                if (menuIndex === 0) togglePause(false);
+                else resetToLobby();
+            }
+            return;
+        }
+
+        if (data.command === 'START_PAUSE') {
+            if (gameState === 'LOBBY' && Object.keys(players).length > 0) {
+                gameState = 'PLAYING';
+                currentLevel = 1;
+                document.getElementById('lobby')!.style.display = 'none';
+                document.getElementById('game-container')!.style.display = 'block';
+                runner.enabled = true;
+                loadLevel(currentLevel); 
+            } else if (gameState === 'PLAYING') togglePause(true);
+        }
+
+        // 🛑 FILTRO CRÍTICO: Si no se está jugando activamente, ignoramos los comandos de movimiento
+        if (gameState !== 'PLAYING') return;
+
+        if (players[data.id]) {
+            const p = players[data.id];
+            if (data.command === 'LEFT_START') playerInputs[data.id].left = true;
+            if (data.command === 'LEFT_STOP') playerInputs[data.id].left = false;
+            if (data.command === 'RIGHT_START') playerInputs[data.id].right = true;
+            if (data.command === 'RIGHT_STOP') playerInputs[data.id].right = false;
+            
+            // 🚀 FILTRO EN TIEMPO REAL (Opción B): Modificamos directamente la recepción
+            if (data.command === 'JUMP') {
+                // Chequeamos velocidad e histéresis del Y de inmediato
+                if (Math.abs(p.velocity.y) < 0.1 && !hasPlayerOnTop(p)) {
+                    Matter.Body.applyForce(p, p.position, { x: 0, y: -0.065 });
+                    
+                    // 💡 TRUCO: Le seteamos una micro-velocidad manual en Y al instante
+                    // Esto hace que el PRÓXIMO mensaje "JUMP" que llegue en el mismo milisegundo
+                    // rebote en el IF de arriba porque p.velocity.y ya no va a ser 0.
+                    p.velocity.y = -0.15; 
+                }
+            }
+        }
+    };
+</script>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+
+    :root {
+        --bg-color: #1e293b;            
+        --panel-bg: #0f172a;            
+        --text-main: #ffffff;           
+        --text-muted: #94a3b8;          
+        --accent-blue: #3b82f6;         
+        --accent-green: #22c55e;        
+        --accent-yellow: #eab308;       
+        --accent-red: #ef4444;          
+    }
+
+    * {
+        box-sizing: border-box;
+    }
+
+    main { 
+        width: 100vw; 
+        height: 100vh; 
+        overflow: hidden; 
+        background: var(--bg-color); 
+        margin: 0; 
+        position: relative; 
+        font-family: 'Fredoka', sans-serif;
+    }
+
+    #lobby {
+        position: absolute; 
+        inset: 0; 
+        display: flex; 
+        flex-direction: column; 
+        align-items: center; 
+        justify-content: center;
+        gap: 15px; 
+        z-index: 100; 
+        background-color: var(--bg-color);
+        padding: 20px;
+    }
+
+    #lobby.paused-bg {
+        background: rgba(15, 23, 42, 0.9);
+    }
+
+    .glass-panel {
+        background: var(--panel-bg);
+        border: 2px solid #334155;
+        border-radius: 16px;
+    }
+
+    .title { 
+        font-size: clamp(3rem, 6vw, 5.5rem); 
+        font-weight: 700;
+        color: var(--text-main);
+        text-transform: uppercase;
+        letter-spacing: 4px;
+        margin: 0;
+        text-align: center;
+    }
+
+    .subtitle {
+        font-size: clamp(1rem, 1.8vw, 1.4rem);
+        color: var(--accent-yellow);
+        margin: 0 0 5px 0;
+        font-weight: 600;
+        letter-spacing: 1px;
+        text-align: center;
+    }
+
+    .qr-container { 
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 25px 40px; 
+        max-width: 90vw;
+    }
+
+    .scan-text {
+        color: var(--text-main);
+        font-size: clamp(1.4rem, 2.5vw, 1.9rem);
+        font-weight: 700;
+        margin: 0 0 15px 0;
+        letter-spacing: 2px;
+    }
+
+    .qr-content {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 30px; 
+    }
+
+    #qr-canvas {
+        border-radius: 8px;
+        border: 4px solid var(--text-main);
+        max-width: 100%;
+        height: auto;
+    }
+
+    .ip-info {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    .ip-label {
+        font-size: clamp(0.9rem, 1.5vw, 1.1rem);
+        color: var(--text-muted);
+        margin: 0 0 2px 0;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    #ip-display {
+        font-size: clamp(1.8rem, 3.5vw, 2.4rem);
+        color: var(--accent-green);
+        margin: 0;
+    }
+
+    .status-box {
+        padding: 10px 30px;
+        font-size: clamp(1rem, 1.8vw, 1.2rem);
+        color: var(--text-main);
+        font-weight: 600;
+        letter-spacing: 1px;
+        text-align: center;
+    }
+
+    .status-box .highlight {
+        color: var(--accent-yellow);
+        font-size: clamp(1.3rem, 2.2vw, 1.6rem);
+    }
+
+    .status-box .max-players {
+        color: var(--text-muted);
+    }
+
+    #pause-menu {
+        padding: 40px 60px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+        max-width: 90vw;
+    }
+
+    .pause-title { 
+        font-size: clamp(2rem, 4vw, 3rem); 
+        color: var(--accent-blue); 
+        margin: 0 0 15px 0;
+    }
+
+    .menu-options { 
+        display: flex; 
+        flex-direction: column; 
+        gap: 12px; 
+        width: 100%;
+    }
+
+    .menu-item { 
+        font-size: clamp(1.2rem, 2.5vw, 1.6rem); 
+        font-weight: 600; 
+        padding: 10px 30px; 
+        border-radius: 8px; 
+        color: var(--text-muted); 
+        background: rgba(255, 255, 255, 0.05);
+        margin: 0;
+        border: 2px solid transparent;
+    }
+
+    .menu-item.active { 
+        color: var(--text-main); 
+        background: var(--accent-red); 
+        border-color: #f87171;
+    }
+
+    #win-screen {
+        position: absolute; 
+        inset: 0; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center;
+        z-index: 50; 
+        background: rgba(15, 23, 42, 0.95);
+        padding: 20px;
+    }
+
+    .win-panel {
+        padding: 40px 60px;
+        text-align: center;
+        border: 2px solid var(--accent-green);
+        max-width: 90vw;
+    }
+
+    .win-title { 
+        font-size: clamp(3.5rem, 7vw, 6rem); 
+        color: var(--accent-green); 
+        margin: 0 0 10px 0; 
+    }
+
+    .win-subtitle { 
+        font-size: clamp(1.2rem, 2.5vw, 1.8rem); 
+        color: var(--text-main); 
+        margin: 0 0 20px 0; 
+    }
+
+    .win-timer { 
+        font-size: clamp(0.9rem, 1.5vw, 1.1rem); 
+        color: var(--accent-yellow); 
+        margin: 0;
+    }
+
+    #game-container { 
+        width: 100%; 
+        height: 100%; 
+        position: absolute; 
+        inset: 0; 
+        z-index: 1; 
+        background: var(--bg-color); 
+    }
+</style>
