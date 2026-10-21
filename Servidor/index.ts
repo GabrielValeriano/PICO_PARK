@@ -93,5 +93,5 @@ const app = new Elysia()
     })
     // 👈 CAMBIO ACÁ: Forzamos port y hostname para abrir el servidor a la red local
     .listen({ port: 3000, hostname: '0.0.0.0' }, () => {
-        console.log(`🚀 SERVER EN RUNNING EN http://${localIP}:3000`);
+        console.log(` SERVER ESTA CORRIENDO EN http://${localIP}:3000`);
     });
