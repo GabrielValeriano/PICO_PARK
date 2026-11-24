@@ -47,7 +47,7 @@ import Layout from '../layouts/Layout.astro';
     import Matter from 'matter-js';
     import QRCode from 'qrcode';
 
-    const socket = new WebSocket(`ws://${window.location.hostname}:3000/ws`);
+    const socket = new WebSocket(`ws://${window.location.hostname}:3002/ws`);
     let players = {}; 
     let playerInputs = {}; 
     let gameState = 'LOBBY';
@@ -321,7 +321,7 @@ import Layout from '../layouts/Layout.astro';
 
         if (data.type === 'server_info') {
             const canvas = document.getElementById('qr-canvas');
-            if (canvas) QRCode.toCanvas(canvas, `ws://${data.ip}:3000/ws`, { 
+            if (canvas) QRCode.toCanvas(canvas, `ws://${data.ip}:3002/ws`, { 
                 width: 180, 
                 color: { dark: '#0f172a', light: '#ffffff' }, 
                 margin: 2

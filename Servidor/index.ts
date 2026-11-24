@@ -52,7 +52,7 @@ const app = new Elysia()
 
                 if (data.type === 'is_game') {
                     ws.subscribe('pico-park');
-                    ws.send({ type: 'server_info', ip: localIP });
+                    ws.send({ type: 'server_info', ip: process.env.PUBLIC_IP || '10.56.31.44' });
                     Object.values(players).forEach(p => {
                         if (p) ws.send({ type: 'new_player', id: p.id });
                     });

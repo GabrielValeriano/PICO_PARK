@@ -1,0 +1,14 @@
+services:
+  juego:
+    build: ./Juego
+    container_name: picopark-juego
+    ports:
+      - "4321:4321"
+    restart: unless-stopped
+
+  servidor:
+    build: ./Servidor
+    container_name: picopark-servidor
+    ports:
+      - "3002:3000"
+    restart: unless-stopped
