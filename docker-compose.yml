@@ -1,6 +1,7 @@
 services:
   juego:
     build: ./Juego
+    image: gabrielvaleriano/picopark-juego:latest
     container_name: picopark-juego
     ports:
       - "4321:4321"
@@ -8,6 +9,7 @@ services:
 
   servidor:
     build: ./Servidor
+    image: gabrielvaleriano/picopark-servidor:latest
     container_name: picopark-servidor
     ports:
       - "3002:3000"

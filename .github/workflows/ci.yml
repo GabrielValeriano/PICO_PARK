@@ -1,4 +1,4 @@
-name: CI - Build y Publicar Imágenes
+name: CI/CD - Build, Publicar y Desplegar
 
 on:
   push:
@@ -73,3 +73,22 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/picopark-servidor:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/picopark-servidor:sha-${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar en la VM vía SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/proyecto/PICO_PARK
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker compose pull
+            docker compose up -d
+            docker compose ps
