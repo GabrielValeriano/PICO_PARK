@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Despliega una versión de PICO_PARK en la VM y vuelve a la anterior si la verificación falla.
+#
+# Uso:   scripts/deploy.sh <tag>          ej: scripts/deploy.sh sha-d562bdf
+# Lo llama el job "deploy" del workflow (runner self-hosted) y también sirve
+# para desplegar o volver atrás a mano desde la VM.
+set -euo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-/opt/proyecto/PICO_PARK}"
+STATE_DIR="$PROJECT_DIR/.deploy"            # versión actual + bitácora (no se versiona)
+NEW_TAG="${1:?Falta el tag a desplegar (ej: sha-d562bdf)}"
+JUEGO_URL="${JUEGO_URL:-http://localhost:4321/}"
+SERVIDOR_URL="${SERVIDOR_URL:-http://localhost:3002/}"
+TIMEOUT="${HEALTH_TIMEOUT:-60}"             # segundos para que la versión nueva responda
+
+cd "$PROJECT_DIR"
+mkdir -p "$STATE_DIR"
+PREV_TAG="$(cat "$STATE_DIR/current" 2>/dev/null || echo latest)"
+
+log() { echo "[$(date '+%F %T')] $*" | tee -a "$STATE_DIR/deploy.log"; }
+
+levantar() {
+  export IMAGE_TAG="$1"                     # docker-compose.yml usa ${IMAGE_TAG:-latest}
+  docker compose pull
+  docker compose up -d --remove-orphans
+}
+
+# OK si la URL devuelve cualquier respuesta HTTP 2xx, 3xx o 4xx
+# (un 404 en la raíz del servidor igual demuestra que el proceso está vivo).
+responde() {
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$1" || true)"
+  [[ "$code" =~ ^[234][0-9][0-9]$ ]]
+}
+
+verificar() {
+  local fin=$((SECONDS + TIMEOUT)) corriendo
+  while (( SECONDS < fin )); do
+    corriendo="$(docker compose ps --status running --services | wc -l)"
+    if (( corriendo >= 2 )) && responde "$JUEGO_URL" && responde "$SERVIDOR_URL"; then
+      return 0
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+log "Desplegando $NEW_TAG (versión anterior: $PREV_TAG)"
+levantar "$NEW_TAG"
+
+if verificar; then
+  echo "$NEW_TAG" > "$STATE_DIR/current"
+  log "OK: $NEW_TAG en línea"
+  docker compose ps
+  docker image prune -f >/dev/null          # solo borra imágenes huérfanas; las etiquetadas quedan para rollback
+  exit 0
+fi
+
+log "FALLÓ la verificación de $NEW_TAG. Últimos logs:"
+docker compose logs --tail=50 || true
+log "Rollback a $PREV_TAG"
+levantar "$PREV_TAG"
+if verificar; then
+  log "Rollback OK: $PREV_TAG en línea"
+else
+  log "El rollback también falló: revisar a mano (docker compose logs)"
+fi
+exit 1                                       # el pipeline queda en rojo aunque el rollback funcione

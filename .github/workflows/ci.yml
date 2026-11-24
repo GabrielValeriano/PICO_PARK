@@ -74,21 +74,46 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/picopark-servidor:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/picopark-servidor:sha-${{ github.sha }}
 
-  deploy:
-    needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Desplegar en la VM vía SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          script: |
-            set -e
-            cd /opt/proyecto/PICO_PARK
-            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker compose pull
-            docker compose up -d
-            docker compose ps
+    deploy:
+      needs: build-and-push
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      runs-on: [self-hosted, linux, picopark-vm]     # el runner instalado en la VM
+      concurrency:
+        group: deploy-vm                              # nunca dos deploys a la vez
+        cancel-in-progress: false
+      environment:
+        name: produccion-vm                           # aparece en la pestaña "Deployments" del repo
+        url: http://10.56.31.44:4321
+      steps:
+        - name: Actualizar el repo en la VM (compose y script)
+          working-directory: /opt/proyecto/PICO_PARK
+          run: git pull --ff-only origin main
+
+        - name: Login en Docker Hub
+          env:                                        # el token va por variable, no pegado en el script
+            DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+            DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          run: echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+
+        - name: Desplegar, verificar y rollback si falla
+          working-directory: /opt/proyecto/PICO_PARK
+          # Tiene que coincidir con el tag que publica build-and-push.
+          # sha corto (7 caracteres, lo que genera docker/metadata-action type=sha): sha-${GITHUB_SHA::7}
+          # sha completo (si el tag es sha-${{ github.sha }}):                    sha-${GITHUB_SHA}
+          run: bash scripts/deploy.sh "sha-${GITHUB_SHA::7}"    needs: build-and-push
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      runs-on: ubuntu-latest
+      steps:
+        - name: Desplegar en la VM vía SSH
+          uses: appleboy/ssh-action@v1.2.0
+          with:
+            host: ${{ secrets.VM_HOST }}
+            username: ${{ secrets.VM_USER }}
+            key: ${{ secrets.VM_SSH_KEY }}
+            script: |
+              set -e
+              cd /opt/proyecto/PICO_PARK
+              echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+              docker compose pull
+              docker compose up -d
+              docker compose ps
