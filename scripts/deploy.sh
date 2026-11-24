@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Despliega una versión de PICO_PARK en la VM y vuelve a la anterior si la verificación falla.
 #
-# Uso:   scripts/deploy.sh <tag>          ej: scripts/deploy.sh sha-d562bdf
+# Uso:   scripts/deploy.sh <tag>          ej: scripts/deploy.sh "sha-$(git rev-parse d562bdf)"
+# Prueba de rollback:  SIMULAR_FALLO=1 scripts/deploy.sh <tag>
 # Lo llama el job "deploy" del workflow (runner self-hosted) y también sirve
 # para desplegar o volver atrás a mano desde la VM.
 set -euo pipefail
@@ -34,6 +35,13 @@ responde() {
 }
 
 verificar() {
+  # Prueba de rollback: con SIMULAR_FALLO=1 la PRIMERA verificación falla a propósito;
+  # la del rollback se hace normal.
+  if [[ "${SIMULAR_FALLO:-0}" == 1 ]]; then
+    SIMULAR_FALLO=0
+    log "(prueba) se simula una verificación fallida"
+    return 1
+  fi
   local fin=$((SECONDS + TIMEOUT)) corriendo
   while (( SECONDS < fin )); do
     corriendo="$(docker compose ps --status running --services | wc -l)"
