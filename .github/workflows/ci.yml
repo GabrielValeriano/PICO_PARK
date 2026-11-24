@@ -24,17 +24,25 @@ jobs:
       - name: Instalar dependencias y verificar build/tests
         shell: bash
         run: |
+          run_test_if_defined() {
+            if bun -e 'const pkg = require("./package.json"); process.exit(pkg.scripts && pkg.scripts.test ? 0 : 1)'; then
+              bun run test
+            else
+              echo "Sin script test definido, se omite."
+            fi
+          }
+
           if [ -d "Juego" ] && [ -f "Juego/package.json" ]; then
             cd Juego && bun install
             bun run --if-present build
-            bun run --if-present test
+            run_test_if_defined
             cd ..
           fi
 
           if [ -d "Servidor" ] && [ -f "Servidor/package.json" ]; then
             cd Servidor && bun install
             bun run --if-present build
-            bun run --if-present test
+            run_test_if_defined
             bun x tsc --noEmit index.ts || true
             cd ..
           fi
