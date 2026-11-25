@@ -71,6 +71,24 @@ curl http://localhost:3002/health                   # {"status":"ok","jugadores"
 cat .deploy/deploy.log                              # bitácora de deploys (actividad 05)
 ```
 
+### Incidente: disco lleno (25/11)
+
+Al desplegar esta actividad, la VM llegó al **100% del disco** (`/dev/vda1`, 27 de 28 GB):
+
+- Primero falló la descarga de las imágenes en medio de un deploy.
+- Después el runner de GitHub Actions no podía escribir ni su propio log (`No space left on device`): se caía y se reiniciaba cada 5 segundos, y el job quedaba en "Waiting for a runner".
+
+`docker system df` mostró la causa: imágenes acumuladas de deploys anteriores (13 GB, 4 GB sin usar) y caché de builds de cuando se construía en la VM (4,8 GB). Se liberó espacio con `docker image prune -a` y `docker builder prune -a`, y se reinició el runner.
+
+**Prevención:** al terminar cada deploy correcto, `scripts/deploy.sh` borra las imágenes de PICO_PARK salvo la versión nueva y la anterior (la que se necesita para un rollback) y anota en `.deploy/deploy.log` cuánto disco queda libre. Si la limpieza falla, no afecta al deploy. Esto, junto con la rotación de logs, evita que la VM vuelva a llenarse sola.
+
+Para revisar el disco:
+
+```bash
+df -h /
+docker system df
+```
+
 ## 4. Variable de entorno para la IP del QR
 
 El servidor ya leía `process.env.PUBLIC_IP`, pero nadie la definía y se usaba la IP escrita en el código. Ahora el compose la toma de `VM_IP`, del archivo `.env` de la VM:

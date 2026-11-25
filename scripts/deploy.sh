@@ -57,6 +57,22 @@ contenedores_sanos() {
   (( total >= 2 ))
 }
 
+# Borra las imágenes viejas de PICO_PARK: conserva solo la versión nueva y la anterior
+# (para poder hacer rollback). Nunca hace fallar el deploy.
+limpiar_imagenes() {
+  local repo img
+  for repo in gabrielvaleriano/picopark-juego gabrielvaleriano/picopark-servidor; do
+    docker images "$repo" --format '{{.Repository}}:{{.Tag}}' | while read -r img; do
+      case "${img##*:}" in
+        "$NEW_TAG"|"$PREV_TAG"|latest) ;;
+        *) docker rmi "$img" >/dev/null 2>&1 || true ;;
+      esac
+    done
+  done
+  docker image prune -f >/dev/null 2>&1 || true   # capas huérfanas
+  log "Limpieza de imágenes hecha. Disco: $(df -h / | awk 'NR==2 {print $4 " libres (" $5 " usado)"}')"
+}
+
 verificar() {
   # Prueba de rollback: con SIMULAR_FALLO=1 la PRIMERA verificación falla a propósito;
   # la del rollback se hace normal.
@@ -88,7 +104,7 @@ if verificar; then
   echo "$NEW_TAG" > "$STATE_DIR/current"
   log "OK: $NEW_TAG en línea"
   docker compose ps
-  docker image prune -f >/dev/null          # solo borra imágenes huérfanas; las etiquetadas quedan para rollback
+  limpiar_imagenes || true
   exit 0
 fi
 
