@@ -19,7 +19,8 @@ services:
     image: gabrielvaleriano/picopark-servidor:${IMAGE_TAG:-latest}
     container_name: picopark-servidor
     ports:
-      - "3002:3000"
+      - "3002:3000"   # lo usan la página del juego y el QR
+      - "3000:3000"   # conexión con IP manual del APK del Gamepad (usa el puerto 3000)
     environment:
       PUBLIC_IP: ${VM_IP:-10.56.31.44}   # IP que se muestra en el QR (sale del .env de la VM)
     restart: unless-stopped
