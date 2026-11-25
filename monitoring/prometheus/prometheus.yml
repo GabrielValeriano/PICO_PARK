@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s       # cada cuánto se piden las métricas
+  evaluation_interval: 15s   # cada cuánto se evalúan las alertas
+
+rule_files:
+  - /etc/prometheus/alertas.yml
+
+scrape_configs:
+  # El propio Prometheus
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # La VM (node-exporter corre con la red del host)
+  - job_name: vm
+    static_configs:
+      - targets: ["host.docker.internal:9101"]
+        labels:
+          instance: MaquinaVirtual-nain
+
+  # Los contenedores Docker
+  - job_name: contenedores
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Métricas propias del servidor del juego (GET /metrics)
+  - job_name: picopark-servidor
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:3002"]

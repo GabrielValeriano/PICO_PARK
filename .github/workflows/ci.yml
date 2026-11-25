@@ -98,3 +98,15 @@ jobs:
         working-directory: /opt/proyecto/PICO_PARK
         # Mismo tag que publica build-and-push: sha-<hash completo del commit>
         run: bash scripts/deploy.sh "sha-${GITHUB_SHA}"
+
+      # Monitoreo (actividad 07). Si falla, no se marca el deploy como fallido.
+      - name: Levantar o actualizar el monitoreo
+        if: always()
+        continue-on-error: true
+        working-directory: /opt/proyecto/PICO_PARK
+        env:
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          docker compose -f monitoring/docker-compose.yml pull --quiet
+          docker compose -f monitoring/docker-compose.yml up -d --remove-orphans
+          docker compose -f monitoring/docker-compose.yml ps

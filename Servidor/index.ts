@@ -22,18 +22,44 @@ interface Player {
 
 let players: Record<string, Player | undefined> = {};
 
+// Contadores para Prometheus (GET /metrics)
+let conexionesTotales = 0;
+let mensajesTotales = 0;
+const jugadoresConectados = () => Object.values(players).filter(Boolean).length;
+
 const app = new Elysia()
     // Healthcheck: lo usan Docker (HEALTHCHECK) y el script de deploy
     .get('/health', () => ({
         status: 'ok',
-        jugadores: Object.values(players).filter(Boolean).length,
+        jugadores: jugadoresConectados(),
         uptime: Math.round(process.uptime())
     }))
+    // Métricas en formato Prometheus (las lee el job "picopark-servidor")
+    .get('/metrics', ({ set }) => {
+        set.headers['content-type'] = 'text/plain; version=0.0.4; charset=utf-8';
+        return [
+            '# HELP picopark_jugadores_conectados Mandos conectados ahora mismo.',
+            '# TYPE picopark_jugadores_conectados gauge',
+            `picopark_jugadores_conectados ${jugadoresConectados()}`,
+            '# HELP picopark_conexiones_total Conexiones WebSocket abiertas desde que arrancó el servidor.',
+            '# TYPE picopark_conexiones_total counter',
+            `picopark_conexiones_total ${conexionesTotales}`,
+            '# HELP picopark_mensajes_total Mensajes WebSocket recibidos desde que arrancó el servidor.',
+            '# TYPE picopark_mensajes_total counter',
+            `picopark_mensajes_total ${mensajesTotales}`,
+            '# HELP picopark_uptime_seconds Segundos desde que arrancó el servidor.',
+            '# TYPE picopark_uptime_seconds gauge',
+            `picopark_uptime_seconds ${Math.round(process.uptime())}`,
+            ''
+        ].join('\n');
+    })
     .ws('/ws', {
         open(ws) {
+            conexionesTotales++;
             console.log('📡 Intento de conexión');
         },
         message(ws, message: any) {
+            mensajesTotales++;
             try {
                 const data = typeof message === 'string' ? JSON.parse(message) : message;
                 

@@ -1,0 +1,46 @@
+# Se ven en Prometheus → pestaña "Alerts" (no se envían por mail: no hay Alertmanager).
+groups:
+  - name: vm
+    rules:
+      - alert: DiscoCasiLleno
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disco de la VM al {{ $value | printf \"%.0f\" }}%"
+          description: "Liberar espacio (docker image prune -a, docker builder prune -a) antes de llegar al 100%."
+
+      - alert: MemoriaAlta
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memoria de la VM al {{ $value | printf \"%.0f\" }}%"
+
+      - alert: CPUAlta
+        expr: 100 - avg(rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU de la VM al {{ $value | printf \"%.0f\" }}% hace más de 10 minutos"
+
+  - name: servicios
+    rules:
+      - alert: ServicioCaido
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus no puede leer métricas de {{ $labels.job }} ({{ $labels.instance }})"
+
+      - alert: JuegoCaido
+        expr: absent(container_last_seen{name="picopark-juego"}) or (time() - container_last_seen{name="picopark-juego"}) > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "El contenedor picopark-juego no está corriendo"
