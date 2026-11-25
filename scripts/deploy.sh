@@ -20,10 +20,20 @@ PREV_TAG="$(cat "$STATE_DIR/current" 2>/dev/null || echo latest)"
 
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$STATE_DIR/deploy.log"; }
 
+# Descarga las imágenes de un tag, con 3 intentos (la red de la VM a veces corta descargas).
+descargar() {
+  local intento
+  for intento in 1 2 3; do
+    if IMAGE_TAG="$1" docker compose pull --quiet; then return 0; fi
+    log "Falló la descarga de $1 (intento $intento/3)"
+    sleep 5
+  done
+  return 1
+}
+
 levantar() {
   export IMAGE_TAG="$1"                     # docker-compose.yml usa ${IMAGE_TAG:-latest}
-  docker compose pull
-  docker compose up -d --remove-orphans
+  docker compose up -d --remove-orphans || log "docker compose up devolvió error con $1"
 }
 
 # OK si la URL devuelve cualquier respuesta HTTP 2xx, 3xx o 4xx
@@ -66,6 +76,12 @@ verificar() {
 }
 
 log "Desplegando $NEW_TAG (versión anterior: $PREV_TAG)"
+
+# Si no se pudo descargar, no se tocó nada: sigue corriendo la versión anterior.
+if ! descargar "$NEW_TAG"; then
+  log "No se pudo descargar $NEW_TAG. No se cambió nada: sigue en línea $PREV_TAG"
+  exit 1
+fi
 levantar "$NEW_TAG"
 
 if verificar; then
@@ -79,6 +95,7 @@ fi
 log "FALLÓ la verificación de $NEW_TAG. Últimos logs:"
 docker compose logs --tail=50 || true
 log "Rollback a $PREV_TAG"
+descargar "$PREV_TAG" || log "No se pudo descargar $PREV_TAG; se usa la copia local de la imagen"
 levantar "$PREV_TAG"
 if verificar; then
   log "Rollback OK: $PREV_TAG en línea"
