@@ -23,6 +23,12 @@ interface Player {
 let players: Record<string, Player | undefined> = {};
 
 const app = new Elysia()
+    // Healthcheck: lo usan Docker (HEALTHCHECK) y el script de deploy
+    .get('/health', () => ({
+        status: 'ok',
+        jugadores: Object.values(players).filter(Boolean).length,
+        uptime: Math.round(process.uptime())
+    }))
     .ws('/ws', {
         open(ws) {
             console.log('📡 Intento de conexión');

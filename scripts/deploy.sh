@@ -34,6 +34,19 @@ responde() {
   [[ "$code" =~ ^[234][0-9][0-9]$ ]]
 }
 
+# OK si todos los contenedores están "running" y, si la imagen trae HEALTHCHECK, "healthy".
+# Las imágenes viejas (sin HEALTHCHECK) dan "none" y se aceptan: así el rollback a
+# versiones anteriores a la 06 sigue funcionando.
+contenedores_sanos() {
+  local id estado total=0
+  for id in $(docker compose ps -q); do
+    total=$((total + 1))
+    estado="$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id")"
+    [[ "$estado" == "running/healthy" || "$estado" == "running/none" ]] || return 1
+  done
+  (( total >= 2 ))
+}
+
 verificar() {
   # Prueba de rollback: con SIMULAR_FALLO=1 la PRIMERA verificación falla a propósito;
   # la del rollback se hace normal.
@@ -42,10 +55,9 @@ verificar() {
     log "(prueba) se simula una verificación fallida"
     return 1
   fi
-  local fin=$((SECONDS + TIMEOUT)) corriendo
+  local fin=$((SECONDS + TIMEOUT))
   while (( SECONDS < fin )); do
-    corriendo="$(docker compose ps --status running --services | wc -l)"
-    if (( corriendo >= 2 )) && responde "$JUEGO_URL" && responde "$SERVIDOR_URL"; then
+    if contenedores_sanos && responde "$JUEGO_URL" && responde "$SERVIDOR_URL"; then
       return 0
     fi
     sleep 3

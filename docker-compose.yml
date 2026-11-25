@@ -1,11 +1,18 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"   # rota el log al llegar a 10 MB
+    max-file: "3"     # guarda como máximo 3 archivos por contenedor
+
 services:
   juego:
     build: ./Juego
     image: gabrielvaleriano/picopark-juego:${IMAGE_TAG:-latest}
     container_name: picopark-juego
     ports:
-      - "4321:4321"
+      - "4321:80"     # nginx adentro escucha en 80; afuera sigue siendo 4321
     restart: unless-stopped
+    logging: *logging
 
   servidor:
     build: ./Servidor
@@ -13,4 +20,7 @@ services:
     container_name: picopark-servidor
     ports:
       - "3002:3000"
+    environment:
+      PUBLIC_IP: ${VM_IP:-10.56.31.44}   # IP que se muestra en el QR (sale del .env de la VM)
     restart: unless-stopped
+    logging: *logging
